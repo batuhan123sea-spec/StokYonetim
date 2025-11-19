@@ -7,9 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { getCurrentUserId } from '@/lib/constants';
-import { Supplier } from '@/types';
+import { Supplier, Currency } from '@/types';
 import { formatCurrency } from '@/lib/utils';
-import { Trash2, Plus } from 'lucide-react';
+import { Trash2, Plus, TrendingUp } from 'lucide-react';
+import { useExchangeRates } from '@/hooks/useExchangeRates';
 
 interface ProductSupplier {
   id: string;
@@ -17,6 +18,7 @@ interface ProductSupplier {
   supplier_name?: string;
   unit_price: number;
   currency: string;
+  fx_rate_at_purchase: number;
   last_purchase_date?: string;
 }
 
@@ -36,11 +38,12 @@ export function ProductSupplierDialog({
   onSaved 
 }: ProductSupplierDialogProps) {
   const [loading, setLoading] = useState(false);
+  const { rates, loading: ratesLoading } = useExchangeRates();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [productSuppliers, setProductSuppliers] = useState<ProductSupplier[]>([]);
   const [newSupplierId, setNewSupplierId] = useState('');
   const [newUnitPrice, setNewUnitPrice] = useState('');
-  const [newCurrency, setNewCurrency] = useState('TRY');
+  const [newCurrency, setNewCurrency] = useState<Currency>('TRY');
 
   useEffect(() => {
     if (open) {
@@ -74,6 +77,7 @@ export function ProductSupplierDialog({
         supplier_name: ps.suppliers?.name,
         unit_price: ps.unit_price,
         currency: ps.currency,
+        fx_rate_at_purchase: ps.fx_rate_at_purchase || 1.0,
         last_purchase_date: ps.last_purchase_date,
       }));
 
@@ -107,12 +111,21 @@ export function ProductSupplierDialog({
 
     setLoading(true);
     try {
+      // Calculate fx rate based on selected currency
+      let fxRate = 1.0;
+      if (newCurrency === 'USD') {
+        fxRate = rates.USD;
+      } else if (newCurrency === 'EUR') {
+        fxRate = rates.EUR;
+      }
+
       const { error } = await supabase.from('product_suppliers').insert({
         user_id: getCurrentUserId(),
         product_id: productId,
         supplier_id: newSupplierId,
         unit_price: unitPrice,
         currency: newCurrency,
+        fx_rate_at_purchase: fxRate,
         last_purchase_date: new Date().toISOString(),
       });
 
@@ -158,10 +171,10 @@ export function ProductSupplierDialog({
   const getBestPrice = () => {
     if (productSuppliers.length === 0) return null;
     
-    // Convert all prices to TRY for comparison (simplified)
+    // Convert all prices to TRY for comparison using recorded fx rates
     const prices = productSuppliers.map(ps => ({
       ...ps,
-      priceInTRY: ps.currency === 'TRY' ? ps.unit_price : ps.unit_price * (ps.currency === 'USD' ? 30 : 32),
+      priceInTRY: ps.currency === 'TRY' ? ps.unit_price : ps.unit_price * ps.fx_rate_at_purchase,
     }));
 
     return prices.reduce((best, current) => 
@@ -208,17 +221,26 @@ export function ProductSupplierDialog({
                   onChange={(e) => setNewUnitPrice(e.target.value)}
                   disabled={loading}
                 />
+                {newCurrency !== 'TRY' && newUnitPrice && !isNaN(parseFloat(newUnitPrice)) && (
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                    <TrendingUp className="w-3 h-3" />
+                    <span>
+                      ≈ {formatCurrency(parseFloat(newUnitPrice) * (newCurrency === 'USD' ? rates.USD : rates.EUR))} TL
+                      {ratesLoading && ' (hesaplanıyor...)'}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="col-span-2">
                 <Label>Para Birimi</Label>
-                <Select value={newCurrency} onValueChange={setNewCurrency} disabled={loading}>
+                <Select value={newCurrency} onValueChange={(v: Currency) => setNewCurrency(v)} disabled={loading}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="TRY">₺ TRY</SelectItem>
-                    <SelectItem value="USD">$ USD</SelectItem>
-                    <SelectItem value="EUR">€ EUR</SelectItem>
+                    <SelectItem value="USD">$ USD ({rates.USD.toFixed(2)} TL)</SelectItem>
+                    <SelectItem value="EUR">€ EUR ({rates.EUR.toFixed(2)} TL)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -255,6 +277,7 @@ export function ProductSupplierDialog({
                       <th className="px-4 py-2 text-left text-xs font-semibold">Tedarikçi</th>
                       <th className="px-4 py-2 text-right text-xs font-semibold">Birim Fiyat</th>
                       <th className="px-4 py-2 text-center text-xs font-semibold">Para Birimi</th>
+                      <th className="px-4 py-2 text-right text-xs font-semibold">TL Karşılığı</th>
                       <th className="px-4 py-2 text-center text-xs font-semibold">Son Alış</th>
                       <th className="px-4 py-2 text-center text-xs font-semibold">İşlem</th>
                     </tr>
@@ -275,6 +298,12 @@ export function ProductSupplierDialog({
                           {formatCurrency(ps.unit_price)}
                         </td>
                         <td className="px-4 py-3 text-sm text-center">{ps.currency}</td>
+                        <td className="px-4 py-3 text-sm text-right text-muted-foreground">
+                          {ps.currency === 'TRY' 
+                            ? '-' 
+                            : `${formatCurrency(ps.unit_price * ps.fx_rate_at_purchase)} (@ ${ps.fx_rate_at_purchase.toFixed(2)})`
+                          }
+                        </td>
                         <td className="px-4 py-3 text-sm text-center text-muted-foreground">
                           {ps.last_purchase_date 
                             ? new Date(ps.last_purchase_date).toLocaleDateString('tr-TR')

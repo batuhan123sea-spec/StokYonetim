@@ -193,6 +193,7 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
           tax_rate: parseFloat(taxRate),
           payment_type: paymentType,
           currency,
+          fx_rate: fxRate,
           is_reserved: isReserved,
           created_by: userId,
           odeme_durumu: isReserved ? 'BEKLIYOR' : 'ODEME_YAPILDI',

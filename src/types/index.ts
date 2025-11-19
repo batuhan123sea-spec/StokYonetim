@@ -5,6 +5,7 @@ export type TransactionType = 'reserve' | 'sale' | 'payment' | 'refund' | 'openi
 export type StockMovementType = 'purchase' | 'sale' | 'return' | 'reserve_out' | 'reserve_in' | 'adjustment';
 export type RiskLevel = 'Düşük' | 'Orta' | 'Yüksek';
 export type PaymentStatus = 'BEKLIYOR' | 'ODEME_YAPILDI' | 'KISMIPAID' | 'GECIKTI';
+export type ProductUnit = 'ADET' | 'LITRE' | 'METRE' | 'GRAM' | 'CM' | 'KG' | 'M2' | 'M3';
 
 export interface Category {
   id: string;
@@ -24,9 +25,12 @@ export interface Product {
   sku?: string;
   barcode?: string;
   barcode_image_url?: string;
+  unit: ProductUnit;
   stock_quantity: number;
   min_stock_level: number;
   purchase_price: number;
+  purchase_currency: Currency;
+  purchase_fx_rate: number;
   sale_price: number;
   profit_margin?: number;
   image_url?: string;
@@ -53,6 +57,7 @@ export interface ProductSupplier {
   supplier_id: string;
   unit_price: number;
   currency: Currency;
+  fx_rate_at_purchase: number;
   last_purchase_date?: string;
   created_at: string;
   updated_at: string;
@@ -89,6 +94,7 @@ export interface Sale {
   tax_rate: number;
   payment_type: PaymentType;
   currency: Currency;
+  fx_rate: number;
   is_reserved: boolean;
   is_from_reserve: boolean;
   reserve_id?: string;
@@ -168,6 +174,7 @@ export interface StockMovement {
   ref_type?: string;
   ref_id?: string;
   unit_cost?: number;
+  fx_rate?: number;
   created_at: string;
   user_id?: string;
   notes?: string;
