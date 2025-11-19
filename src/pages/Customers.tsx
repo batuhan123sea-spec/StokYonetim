@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Customer, RiskLevel } from '@/types';
+import { Customer, CustomerSummary, RiskLevel } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,7 +12,7 @@ import { AlphabetFilter } from '@/components/customers/AlphabetFilter';
 import { CustomerDetailPanel } from '@/components/customers/CustomerDetailPanel';
 
 export function Customers() {
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customers, setCustomers] = useState<CustomerSummary[]>([]);
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [riskFilter, setRiskFilter] = useState<RiskLevel | 'all'>('all');
@@ -27,8 +27,9 @@ export function Customers() {
 
   const loadCustomers = async () => {
     try {
+      // Use customer_summary view for comprehensive data including geciken_tutar and son_islem_tarihi
       const { data, error } = await supabase
-        .from('customers')
+        .from('customer_summary')
         .select('*')
         .order('name');
 
@@ -69,8 +70,20 @@ export function Customers() {
     return true;
   });
 
-  const handleEdit = (customer: Customer) => {
-    setSelectedCustomer(customer);
+  const handleEdit = (customer: CustomerSummary) => {
+    // Convert CustomerSummary to Customer for dialog (add missing fields)
+    const customerForEdit: Customer = {
+      ...customer,
+      current_balance: customer.toplam_alacak,
+      credit_limit: customer.kredi_limiti,
+      opening_balance: 0, // Not available in summary, will be fetched if needed
+      opening_currency: 'TRY',
+      notes: '',
+      created_at: '',
+      updated_at: '',
+      user_id: '',
+    };
+    setSelectedCustomer(customerForEdit);
     setDialogOpen(true);
   };
 
@@ -168,7 +181,21 @@ export function Customers() {
         <CustomerList 
           customers={filteredCustomers} 
           onEdit={handleEdit}
-          onViewDetail={(customer) => setDetailCustomer(customer)} 
+          onViewDetail={(customer) => {
+            // Convert CustomerSummary to Customer for detail panel
+            const customerForDetail: Customer = {
+              ...customer,
+              current_balance: customer.toplam_alacak,
+              credit_limit: customer.kredi_limiti,
+              opening_balance: 0,
+              opening_currency: 'TRY',
+              notes: '',
+              created_at: '',
+              updated_at: '',
+              user_id: '',
+            };
+            setDetailCustomer(customerForDetail);
+          }} 
         />
       )}
 
