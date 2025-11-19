@@ -162,6 +162,7 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
       const { error: txError } = await supabase
         .from('customer_transactions')
         .insert({
+          user_id: userId, // Add user_id for RLS
           customer_id: customer.id,
           type: 'payment',
           ref_id: payment.id,
