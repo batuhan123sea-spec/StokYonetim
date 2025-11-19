@@ -41,21 +41,28 @@ export function ZReport() {
       const endDate = new Date(reportDate);
       endDate.setHours(23, 59, 59, 999);
 
-      // Get sales for the day
+      // Get sales for the day (exclude reserved/pending sales)
       const { data: sales, error } = await supabase
         .from('sales')
         .select('*')
         .gte('sale_date', startDate.toISOString())
         .lte('sale_date', endDate.toISOString())
-        .eq('is_reserved', false);
+        .eq('is_reserved', false)
+        .eq('odeme_durumu', 'ODEME_YAPILDI');
 
       if (error) throw error;
 
-      // Calculate totals
-      const totalSales = sales?.reduce((sum, sale) => sum + Number(sale.total_amount), 0) || 0;
+      // Calculate totals (convert all to TRY using recorded fx_rate)
+      let totalSalesInTRY = 0;
+      sales?.forEach(sale => {
+        const amount = Number(sale.total_amount);
+        const fxRate = Number(sale.fx_rate) || 1.0;
+        totalSalesInTRY += amount * fxRate;
+      });
+
       const salesCount = sales?.length || 0;
 
-      // Payment breakdown
+      // Payment breakdown (in TRY)
       const paymentBreakdown = {
         NAKIT: 0,
         KREDI_KARTI: 0,
@@ -65,8 +72,11 @@ export function ZReport() {
 
       sales?.forEach(sale => {
         const amount = Number(sale.total_amount);
+        const fxRate = Number(sale.fx_rate) || 1.0;
+        const amountInTRY = amount * fxRate;
+        
         if (sale.payment_type in paymentBreakdown) {
-          paymentBreakdown[sale.payment_type as keyof typeof paymentBreakdown] += amount;
+          paymentBreakdown[sale.payment_type as keyof typeof paymentBreakdown] += amountInTRY;
         }
       });
 
@@ -79,7 +89,7 @@ export function ZReport() {
       setReportData({
         date: reportDate,
         salesCount,
-        totalSales,
+        totalSales: totalSalesInTRY,
         paymentBreakdown,
         openingCash,
         closingCash,

@@ -130,6 +130,12 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
       },
     ]);
 
+    // Set currency to product's purchase currency if different from TRY
+    if (product.purchase_currency !== 'TRY' && currency === 'TRY') {
+      setCurrency(product.purchase_currency);
+      toast.info(`Para birimi ${product.purchase_currency} olarak değiştirildi`);
+    }
+
     setSelectedProduct('');
     setQuantity('1');
   };
@@ -138,7 +144,24 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
     setItems(items.filter((_, i) => i !== index));
   };
 
-  const totalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+  // Calculate totals with tax
+  const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+  const taxRateDecimal = parseFloat(taxRate) / 100;
+  
+  let taxAmount = 0;
+  let totalAmount = subtotal;
+  
+  if (taxIncluded) {
+    // Tax is already included in the price, extract it
+    // If KDV %20: subtotal = total / 1.20, tax = total - subtotal
+    const actualSubtotal = subtotal / (1 + taxRateDecimal);
+    taxAmount = subtotal - actualSubtotal;
+    totalAmount = subtotal; // Total stays the same
+  } else {
+    // Tax is NOT included, add it
+    taxAmount = subtotal * taxRateDecimal;
+    totalAmount = subtotal + taxAmount;
+  }
   
   // Calculate exchange rate and TL equivalent
   let fxRate = 1.0;
@@ -163,22 +186,10 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
       const userId = getCurrentUserId();
       const now = new Date().toISOString();
       
-      // Calculate tax amounts
-      const taxRateDecimal = parseFloat(taxRate) / 100;
-      let subtotal: number;
-      let taxAmount: number;
-      
-      if (taxIncluded) {
-        // Tax is already included in totalAmount
-        subtotal = totalAmount / (1 + taxRateDecimal);
-        taxAmount = totalAmount - subtotal;
-      } else {
-        // Tax needs to be added
-        subtotal = totalAmount;
-        taxAmount = totalAmount * taxRateDecimal;
-      }
-      
-      const totalWithTax = subtotal + taxAmount;
+      // Tax and totals are already calculated above
+      const finalSubtotal = taxIncluded ? subtotal / (1 + taxRateDecimal) : subtotal;
+      const finalTax = taxAmount;
+      const finalTotal = totalAmount;
       
       // Create sale with exchange rate
       const { data: sale, error: saleError } = await supabase
@@ -186,9 +197,9 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
         .insert({
           user_id: userId,
           customer_id: customerId || null,
-          subtotal,
-          tax: taxAmount,
-          total_amount: totalWithTax,
+          subtotal: finalSubtotal,
+          tax: finalTax,
+          total_amount: finalTotal,
           tax_included: taxIncluded,
           tax_rate: parseFloat(taxRate),
           payment_type: paymentType,
@@ -215,6 +226,49 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
       );
 
       if (itemsError) throw itemsError;
+      
+      // Update stock if not reserved
+      if (!isReserved) {
+        for (const item of items) {
+          // Decrease stock
+          const { data: currentProduct, error: productError } = await supabase
+            .from('products')
+            .select('stock_quantity')
+            .eq('id', item.product_id)
+            .single();
+            
+          if (productError) throw productError;
+          
+          const newStock = currentProduct.stock_quantity - item.quantity;
+          
+          const { error: updateError } = await supabase
+            .from('products')
+            .update({ 
+              stock_quantity: newStock,
+              updated_at: now,
+            })
+            .eq('id', item.product_id);
+            
+          if (updateError) throw updateError;
+          
+          // Create stock movement record
+          const { error: movementError } = await supabase
+            .from('stock_movements')
+            .insert({
+              product_id: item.product_id,
+              change_qty: -item.quantity, // Negative for sale
+              type: 'sale',
+              ref_type: 'sale',
+              ref_id: sale.id,
+              unit_cost: item.unit_price,
+              fx_rate: fxRate,
+              user_id: userId,
+              notes: `Satış No: ${sale.sale_no || sale.id}`,
+            });
+            
+          if (movementError) throw movementError;
+        }
+      }
       
       // If customer selected and not reserved, create customer transaction
       if (customerId && !isReserved) {
@@ -264,8 +318,8 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
       const message = isReserved 
         ? 'Rezerve fiş oluşturuldu' 
         : currency === 'TRY'
-          ? `Satış tamamlandı: ${formatCurrency(totalWithTax)} TL`
-          : `Satış tamamlandı: ${totalWithTax.toFixed(2)} ${currency} (${formatCurrency(totalAmountInTL)} TL @ ${fxRate.toFixed(2)})`;
+          ? `Satış tamamlandı: ${formatCurrency(finalTotal)} TL`
+          : `Satış tamamlandı: ${finalTotal.toFixed(2)} ${currency} (${formatCurrency(totalAmountInTL)} TL @ ${fxRate.toFixed(2)})`;
       
       toast.success(message);
       setItems([]);
@@ -377,6 +431,28 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
                       </td>
                     </tr>
                   ))}
+                  <tr className="border-t border-border bg-secondary/30">
+                    <td colSpan={3} className="px-4 py-2 text-right text-sm">
+                      Ara Toplam:
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <div className="font-semibold">
+                        {formatCurrency(subtotal)} {currency === 'TRY' ? '' : currency}
+                      </div>
+                    </td>
+                    <td></td>
+                  </tr>
+                  <tr className="border-t border-border bg-secondary/30">
+                    <td colSpan={3} className="px-4 py-2 text-right text-sm">
+                      KDV ({taxRate}%) {taxIncluded ? '(Dahil)' : ''}:
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <div className="font-semibold">
+                        {formatCurrency(taxAmount)} {currency === 'TRY' ? '' : currency}
+                      </div>
+                    </td>
+                    <td></td>
+                  </tr>
                   <tr className="border-t-2 border-primary bg-secondary/50">
                     <td colSpan={3} className="px-4 py-3 text-right font-semibold">
                       Genel Toplam:

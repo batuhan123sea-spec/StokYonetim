@@ -6,6 +6,7 @@ import { Plus, Barcode, Zap, Package, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { NewSaleDialog } from '@/components/sales/NewSaleDialog';
+import { SalesStats } from '@/components/sales/SalesStats';
 
 export function Sales() {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -137,20 +138,7 @@ export function Sales() {
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card className="p-4">
-          <p className="text-sm text-muted-foreground">Bugünkü Satış</p>
-          <p className="text-2xl font-bold mt-1">0</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-muted-foreground">Bu Hafta</p>
-          <p className="text-2xl font-bold mt-1">0</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-sm text-muted-foreground">Bu Ay</p>
-          <p className="text-2xl font-bold mt-1">0</p>
-        </Card>
-      </div>
+      <SalesStats />
 
       <Card className="p-12 text-center">
         <Barcode className="w-16 h-16 mx-auto text-muted-foreground mb-4 opacity-50" />
