@@ -8,9 +8,10 @@ import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { getCurrentUserId } from '@/lib/constants';
 import { Product, Customer, Currency, PaymentType } from '@/types';
-import { Plus, Trash2, ShoppingCart, Package } from 'lucide-react';
+import { Plus, Trash2, ShoppingCart, Package, TrendingUp } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { formatCurrency } from '@/lib/utils';
+import { useExchangeRates } from '@/hooks/useExchangeRates';
 
 interface SaleItem {
   product_id: string;
@@ -28,6 +29,7 @@ interface NewSaleDialogProps {
 
 export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProps) {
   const [loading, setLoading] = useState(false);
+  const { rates, loading: ratesLoading } = useExchangeRates();
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<SaleItem[]>([]);
@@ -137,6 +139,15 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
   };
 
   const totalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+  
+  // Calculate exchange rate and TL equivalent
+  let fxRate = 1.0;
+  if (currency === 'USD') {
+    fxRate = rates.USD;
+  } else if (currency === 'EUR') {
+    fxRate = rates.EUR;
+  }
+  const totalAmountInTL = totalAmount * fxRate;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,18 +160,42 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
     setLoading(true);
 
     try {
-      // Create sale
+      const userId = getCurrentUserId();
+      const now = new Date().toISOString();
+      
+      // Calculate tax amounts
+      const taxRateDecimal = parseFloat(taxRate) / 100;
+      let subtotal: number;
+      let taxAmount: number;
+      
+      if (taxIncluded) {
+        // Tax is already included in totalAmount
+        subtotal = totalAmount / (1 + taxRateDecimal);
+        taxAmount = totalAmount - subtotal;
+      } else {
+        // Tax needs to be added
+        subtotal = totalAmount;
+        taxAmount = totalAmount * taxRateDecimal;
+      }
+      
+      const totalWithTax = subtotal + taxAmount;
+      
+      // Create sale with exchange rate
       const { data: sale, error: saleError } = await supabase
         .from('sales')
         .insert({
-          user_id: getCurrentUserId(),
+          user_id: userId,
           customer_id: customerId || null,
-          total_amount: totalAmount,
+          subtotal,
+          tax: taxAmount,
+          total_amount: totalWithTax,
           tax_included: taxIncluded,
           tax_rate: parseFloat(taxRate),
           payment_type: paymentType,
           currency,
           is_reserved: isReserved,
+          created_by: userId,
+          odeme_durumu: isReserved ? 'BEKLIYOR' : 'ODEME_YAPILDI',
         })
         .select()
         .single();
@@ -179,8 +214,59 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
       );
 
       if (itemsError) throw itemsError;
+      
+      // If customer selected and not reserved, create customer transaction
+      if (customerId && !isReserved) {
+        // Get current customer balance
+        const { data: customerData, error: customerError } = await supabase
+          .from('customers')
+          .select('current_balance')
+          .eq('id', customerId)
+          .single();
+          
+        if (customerError) throw customerError;
+        
+        const oldBalance = customerData.current_balance;
+        const newBalance = oldBalance + totalAmountInTL; // Sale increases balance (debt)
+        
+        // Create transaction record
+        const { error: txError } = await supabase
+          .from('customer_transactions')
+          .insert({
+            user_id: userId,
+            customer_id: customerId,
+            type: 'sale',
+            ref_id: sale.id,
+            date: now,
+            amount: totalAmountInTL, // TL equivalent
+            currency,
+            fx_rate_to_tl: fxRate,
+            balance_after: newBalance,
+            notes: `Satış No: ${sale.sale_no || sale.id}`,
+            created_by: userId,
+          });
+          
+        if (txError) throw txError;
+        
+        // Update customer balance
+        const { error: updateError } = await supabase
+          .from('customers')
+          .update({ 
+            current_balance: newBalance,
+            updated_at: now,
+          })
+          .eq('id', customerId);
+          
+        if (updateError) throw updateError;
+      }
 
-      toast.success(isReserved ? 'Rezerve fiş oluşturuldu' : 'Satış tamamlandı');
+      const message = isReserved 
+        ? 'Rezerve fiş oluşturuldu' 
+        : currency === 'TRY'
+          ? `Satış tamamlandı: ${formatCurrency(totalWithTax)} TL`
+          : `Satış tamamlandı: ${totalWithTax.toFixed(2)} ${currency} (${formatCurrency(totalAmountInTL)} TL @ ${fxRate.toFixed(2)})`;
+      
+      toast.success(message);
       setItems([]);
       onSaved();
     } catch (error: any) {
@@ -294,8 +380,16 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
                     <td colSpan={3} className="px-4 py-3 text-right font-semibold">
                       Genel Toplam:
                     </td>
-                    <td className="px-4 py-3 text-right font-bold text-lg text-primary">
-                      {formatCurrency(totalAmount)}
+                    <td className="px-4 py-3 text-right">
+                      <div className="font-bold text-lg text-primary">
+                        {formatCurrency(totalAmount)} {currency === 'TRY' ? '' : currency}
+                      </div>
+                      {currency !== 'TRY' && (
+                        <div className="text-xs text-muted-foreground flex items-center justify-end gap-1 mt-1">
+                          <TrendingUp className="w-3 h-3" />
+                          ≈ {formatCurrency(totalAmountInTL)} TL @ {fxRate.toFixed(2)}
+                        </div>
+                      )}
                     </td>
                     <td></td>
                   </tr>
@@ -345,10 +439,16 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="TRY">₺ TRY</SelectItem>
-                  <SelectItem value="USD">$ USD</SelectItem>
-                  <SelectItem value="EUR">€ EUR</SelectItem>
+                  <SelectItem value="USD">$ USD ({rates.USD.toFixed(2)} TL)</SelectItem>
+                  <SelectItem value="EUR">€ EUR ({rates.EUR.toFixed(2)} TL)</SelectItem>
                 </SelectContent>
               </Select>
+              {currency !== 'TRY' && totalAmount > 0 && (
+                <div className="text-xs text-muted-foreground flex items-center gap-1">
+                  <TrendingUp className="w-3 h-3" />
+                  Toplam TL karşılığı: {formatCurrency(totalAmountInTL)} TL
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">

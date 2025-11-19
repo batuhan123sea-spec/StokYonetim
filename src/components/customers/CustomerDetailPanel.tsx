@@ -4,12 +4,13 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Download, FileText, DollarSign, Plus, Printer, Package, AlertCircle, CheckCircle, Clock } from 'lucide-react';
+import { X, Download, FileText, DollarSign, Plus, Printer, Package, AlertCircle, CheckCircle, Clock, TrendingUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Customer, CustomerTransaction, Currency } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
 import { getCurrentUserId } from '@/lib/constants';
+import { useExchangeRates } from '@/hooks/useExchangeRates';
 
 interface CustomerDetailPanelProps {
   customer: Customer;
@@ -37,6 +38,7 @@ interface TransactionWithDetails extends CustomerTransaction {
 export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelProps) {
   const [transactions, setTransactions] = useState<TransactionWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
+  const { rates, loading: ratesLoading } = useExchangeRates();
   
   // Payment form state
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -138,12 +140,26 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
     }
 
     setPaymentLoading(true);
+    
+    // Calculate exchange rate (TRY is base, no conversion needed)
+    let fxRate = 1.0;
+    if (paymentCurrency === 'USD') {
+      fxRate = rates.USD;
+    } else if (paymentCurrency === 'EUR') {
+      fxRate = rates.EUR;
+    }
+    
+    // Calculate TL equivalent
+    const amountInTL = amount * fxRate;
+    
     console.log('\n💰 ===== TAHSİLAT İŞLEMİ BAŞLIYOR =====')
     console.log('📋 İşlem Detayları:', {
       müşteri: customer.name,
       mevcutBakiye: customer.current_balance,
       tahsilatTutarı: amount,
       paraBirimi: paymentCurrency,
+      dövizKuru: fxRate,
+      tlKarşılığı: amountInTL,
       yöntem: paymentMethod,
     });
 
@@ -176,14 +192,17 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
 
       // STEP 2: Calculate new balance
       // MANTIK: Tahsilat yapıldığında müşteri borcunu ödüyor, bakiye DÜŞER
+      // DÖVİZ: Bakiye her zaman TL cinsinden, döviz kurunu uygulayarak düşürürüz
       const oldBalance = customer.current_balance;
-      const newBalance = oldBalance - amount;
+      const newBalance = oldBalance - amountInTL; // Use TL equivalent
       
       console.log('\n💵 ADIM 2/4: Bakiye hesaplanıyor...');
-      console.log('   Önceki Bakiye:', formatCurrency(oldBalance));
-      console.log('   Tahsilat Tutarı:', formatCurrency(amount), '(bakiyeden DÜŞECEK)');
-      console.log('   Yeni Bakiye:', formatCurrency(newBalance));
-      console.log('   Bakiye Değişimi:', formatCurrency(oldBalance - newBalance));
+      console.log('   Önceki Bakiye:', formatCurrency(oldBalance), 'TL');
+      console.log('   Tahsilat Tutarı:', amount, paymentCurrency);
+      console.log('   Kur:', fxRate, 'TL');
+      console.log('   TL Karşılığı:', formatCurrency(amountInTL), 'TL (bakiyeden DÜŞECEK)');
+      console.log('   Yeni Bakiye:', formatCurrency(newBalance), 'TL');
+      console.log('   Bakiye Değişimi:', formatCurrency(oldBalance - newBalance), 'TL');
 
       // STEP 3: Create customer transaction record
       console.log('\n📝 ADIM 3/4: Customer transaction kaydı oluşturuluyor...');
@@ -195,8 +214,9 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
           type: 'payment',
           ref_id: payment.id,
           date: now,
-          amount: amount, // Pozitif değer (ödenen tutar)
+          amount: amountInTL, // TL equivalent for balance tracking
           currency: paymentCurrency,
+          fx_rate_to_tl: fxRate, // Store the exchange rate used
           balance_after: newBalance, // Tahsilat sonrası yeni (düşük) bakiye
           notes: paymentNotes || null,
           created_by: userId,
@@ -229,13 +249,18 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
 
       console.log('\n🎉 ===== TAHSİLAT İŞLEMİ TAMAMLANDI! =====');
       console.log('📊 Özet:', {
-        öncekiBakiye: formatCurrency(oldBalance),
-        tahsilat: formatCurrency(amount),
-        yeniBakiye: formatCurrency(newBalance),
-        fark: formatCurrency(oldBalance - newBalance),
+        öncekiBakiye: formatCurrency(oldBalance) + ' TL',
+        tahsilat: amount + ' ' + paymentCurrency,
+        kur: fxRate + ' TL',
+        tlKarşılığı: formatCurrency(amountInTL) + ' TL',
+        yeniBakiye: formatCurrency(newBalance) + ' TL',
+        fark: formatCurrency(oldBalance - newBalance) + ' TL',
       });
       
-      toast.success(`✅ Tahsilat kaydedildi: ${formatCurrency(amount)} ${paymentCurrency}\nYeni Bakiye: ${formatCurrency(newBalance)}`);
+      const message = paymentCurrency === 'TRY' 
+        ? `✅ Tahsilat kaydedildi: ${formatCurrency(amount)} TL`
+        : `✅ Tahsilat kaydedildi: ${amount} ${paymentCurrency} (${formatCurrency(amountInTL)} TL @ ${fxRate.toFixed(2)})`;
+      toast.success(`${message}\nYeni Bakiye: ${formatCurrency(newBalance)} TL`);
       
       // Reset form
       setPaymentAmount('');
@@ -627,6 +652,15 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
                 disabled={paymentLoading}
                 className="mt-1"
               />
+              {paymentAmount && paymentCurrency !== 'TRY' && !isNaN(parseFloat(paymentAmount)) && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                  <TrendingUp className="w-3 h-3" />
+                  <span>
+                    ≈ {formatCurrency(parseFloat(paymentAmount) * (paymentCurrency === 'USD' ? rates.USD : rates.EUR))} TL
+                    {ratesLoading && ' (hesaplanıyor...)'}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="col-span-2">
               <Label className="text-xs">Para Birimi</Label>
@@ -636,8 +670,8 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="TRY">₺ TRY</SelectItem>
-                  <SelectItem value="USD">$ USD</SelectItem>
-                  <SelectItem value="EUR">€ EUR</SelectItem>
+                  <SelectItem value="USD">$ USD ({rates.USD.toFixed(2)} TL)</SelectItem>
+                  <SelectItem value="EUR">€ EUR ({rates.EUR.toFixed(2)} TL)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -760,12 +794,24 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
                           <p className="text-lg font-bold text-red-600">
                             +{formatCurrency(tx.sale_details.total_amount)} {tx.currency}
                           </p>
+                          {tx.currency !== 'TRY' && tx.fx_rate_to_tl && (
+                            <div className="text-xs text-muted-foreground">
+                              Kur: {tx.fx_rate_to_tl.toFixed(2)} TL
+                            </div>
+                          )}
                         </div>
                       ) : (
-                        <p className={`text-lg font-bold ${tx.type === 'payment' ? 'text-green-600' : 'text-red-600'}`}>
-                          {tx.type === 'payment' ? '-' : '+'}
-                          {formatCurrency(tx.amount)} {tx.currency}
-                        </p>
+                        <div>
+                          <p className={`text-lg font-bold ${tx.type === 'payment' ? 'text-green-600' : 'text-red-600'}`}>
+                            {tx.type === 'payment' ? '-' : '+'}
+                            {formatCurrency(tx.amount)} {tx.currency === 'TRY' ? tx.currency : 'TL'}
+                          </p>
+                          {tx.currency !== 'TRY' && tx.fx_rate_to_tl && (
+                            <div className="text-xs text-muted-foreground">
+                              ({(tx.amount / tx.fx_rate_to_tl).toFixed(2)} {tx.currency} @ {tx.fx_rate_to_tl.toFixed(2)} TL)
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
