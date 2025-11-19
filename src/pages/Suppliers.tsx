@@ -6,6 +6,7 @@ import { Plus, Search, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { SupplierList } from '@/components/suppliers/SupplierList';
 import { SupplierDialog } from '@/components/suppliers/SupplierDialog';
+import { SupplierDetailPanel } from '@/components/suppliers/SupplierDetailPanel';
 
 export function Suppliers() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -13,6 +14,7 @@ export function Suppliers() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
+  const [detailSupplier, setDetailSupplier] = useState<Supplier | null>(null);
 
   useEffect(() => {
     loadSuppliers();
@@ -94,7 +96,11 @@ export function Suppliers() {
           </p>
         </div>
       ) : (
-        <SupplierList suppliers={filteredSuppliers} onEdit={handleEdit} />
+        <SupplierList 
+          suppliers={filteredSuppliers} 
+          onEdit={handleEdit}
+          onViewDetail={(supplier) => setDetailSupplier(supplier)}
+        />
       )}
 
       <SupplierDialog
@@ -103,6 +109,13 @@ export function Suppliers() {
         supplier={selectedSupplier}
         onSave={handleSaved}
       />
+
+      {detailSupplier && (
+        <SupplierDetailPanel 
+          supplier={detailSupplier} 
+          onClose={() => setDetailSupplier(null)} 
+        />
+      )}
     </div>
   );
 }
