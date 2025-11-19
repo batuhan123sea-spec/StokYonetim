@@ -59,7 +59,19 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
         const txWithDetails: TransactionWithDetails = { ...tx };
         
         // Calculate balance before this transaction
-        const previousBalance = tx.balance_after - (tx.type === 'payment' ? -tx.amount : tx.amount);
+        // Logic:
+        // - For payment: balance was HIGHER before (customer paid and reduced debt)
+        //   previous = current + payment_amount
+        // - For sale: balance was LOWER before (customer bought and increased debt)
+        //   previous = current - sale_amount
+        let previousBalance: number;
+        if (tx.type === 'payment') {
+          previousBalance = tx.balance_after + tx.amount; // Payment reduces balance, so previous was higher
+        } else if (tx.type === 'sale') {
+          previousBalance = tx.balance_after - tx.amount; // Sale increases balance, so previous was lower
+        } else {
+          previousBalance = tx.balance_after;
+        }
         txWithDetails.balance_before = previousBalance;
 
         if (tx.type === 'sale' && tx.ref_id) {
@@ -98,21 +110,21 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
     }
 
     setPaymentLoading(true);
-    console.log('💰 Tahsilat işlemi başlatılıyor...', {
-      customer: customer.name,
-      amount,
-      currency: paymentCurrency,
-      method: paymentMethod,
+    console.log('\n💰 ===== TAHSİLAT İŞLEMİ BAŞLIYOR =====')
+    console.log('📋 İşlem Detayları:', {
+      müşteri: customer.name,
+      mevcutBakiye: customer.current_balance,
+      tahsilatTutarı: amount,
+      paraBirimi: paymentCurrency,
+      yöntem: paymentMethod,
     });
 
     try {
       const userId = getCurrentUserId();
       const now = new Date().toISOString();
       
-      console.log('👤 User ID:', userId);
-
-      // Step 1: Insert payment
-      console.log('📝 1/3: Payment kaydı oluşturuluyor...');
+      // STEP 1: Insert payment record
+      console.log('\n📝 ADIM 1/4: Payment kaydı oluşturuluyor...');
       const { data: payment, error: paymentError } = await supabase
         .from('payments')
         .insert({
@@ -129,21 +141,24 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
         .single();
 
       if (paymentError) {
-        console.error('❌ Payment insert hatası:', paymentError);
-        throw new Error(`Payment kaydı oluşturulamadı: ${paymentError.message} (${paymentError.code})`);
+        console.error('❌ Payment insert HATASI:', paymentError);
+        throw new Error(`Payment kaydı oluşturulamadı: ${paymentError.message}`);
       }
-      console.log('✅ Payment kaydı oluşturuldu:', payment.id);
+      console.log('✅ Payment kaydı oluşturuldu! ID:', payment.id);
 
-      // Step 2: Calculate new balance
-      const newBalance = customer.current_balance - amount;
-      console.log('💵 Bakiye hesaplandı:', {
-        önceki: customer.current_balance,
-        tahsilat: amount,
-        yeni: newBalance,
-      });
+      // STEP 2: Calculate new balance
+      // MANTIK: Tahsilat yapıldığında müşteri borcunu ödüyor, bakiye DÜŞER
+      const oldBalance = customer.current_balance;
+      const newBalance = oldBalance - amount;
+      
+      console.log('\n💵 ADIM 2/4: Bakiye hesaplanıyor...');
+      console.log('   Önceki Bakiye:', formatCurrency(oldBalance));
+      console.log('   Tahsilat Tutarı:', formatCurrency(amount), '(bakiyeden DÜŞECEK)');
+      console.log('   Yeni Bakiye:', formatCurrency(newBalance));
+      console.log('   Bakiye Değişimi:', formatCurrency(oldBalance - newBalance));
 
-      // Step 3: Create customer transaction record
-      console.log('📝 2/3: Customer transaction kaydı oluşturuluyor...');
+      // STEP 3: Create customer transaction record
+      console.log('\n📝 ADIM 3/4: Customer transaction kaydı oluşturuluyor...');
       const { error: txError } = await supabase
         .from('customer_transactions')
         .insert({
@@ -151,23 +166,24 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
           type: 'payment',
           ref_id: payment.id,
           date: now,
-          amount,
+          amount: amount, // Pozitif değer (ödenen tutar)
           currency: paymentCurrency,
-          balance_after: newBalance,
+          balance_after: newBalance, // Tahsilat sonrası yeni (düşük) bakiye
           notes: paymentNotes || null,
           created_by: userId,
         });
 
       if (txError) {
-        console.error('❌ Transaction insert hatası:', txError);
-        // Rollback payment
+        console.error('❌ Transaction insert HATASI:', txError);
+        // Rollback: Delete the payment record we just created
+        console.log('🔄 Rollback: Payment kaydı siliniyor...');
         await supabase.from('payments').delete().eq('id', payment.id);
-        throw new Error(`Transaction kaydı oluşturulamadı: ${txError.message} (${txError.code})`);
+        throw new Error(`Transaction kaydı oluşturulamadı: ${txError.message}`);
       }
-      console.log('✅ Transaction kaydı oluşturuldu');
+      console.log('✅ Transaction kaydı oluşturuldu!');
 
-      // Step 4: Update customer balance
-      console.log('📝 3/3: Müşteri bakiyesi güncelleniyor...');
+      // STEP 4: Update customer balance
+      console.log('\n💾 ADIM 4/4: Müşteri bakiyesi güncelleniyor...');
       const { error: updateError } = await supabase
         .from('customers')
         .update({ 
@@ -177,13 +193,20 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
         .eq('id', customer.id);
 
       if (updateError) {
-        console.error('❌ Customer update hatası:', updateError);
-        throw new Error(`Müşteri bakiyesi güncellenemedi: ${updateError.message} (${updateError.code})`);
+        console.error('❌ Customer update HATASI:', updateError);
+        throw new Error(`Müşteri bakiyesi güncellenemedi: ${updateError.message}`);
       }
-      console.log('✅ Müşteri bakiyesi güncellendi');
+      console.log('✅ Müşteri bakiyesi güncellendi!');
 
-      console.log('🎉 Tahsilat işlemi tamamlandı!');
-      toast.success(`Tahsilat kaydedildi: ${formatCurrency(amount)} ${paymentCurrency}`);
+      console.log('\n🎉 ===== TAHSİLAT İŞLEMİ TAMAMLANDI! =====');
+      console.log('📊 Özet:', {
+        öncekiBakiye: formatCurrency(oldBalance),
+        tahsilat: formatCurrency(amount),
+        yeniBakiye: formatCurrency(newBalance),
+        fark: formatCurrency(oldBalance - newBalance),
+      });
+      
+      toast.success(`✅ Tahsilat kaydedildi: ${formatCurrency(amount)} ${paymentCurrency}\nYeni Bakiye: ${formatCurrency(newBalance)}`);
       
       // Reset form
       setPaymentAmount('');
@@ -191,16 +214,17 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
       setPaymentCurrency('TRY');
       setPaymentMethod('cash');
       
-      // Reload data
-      loadCustomerData();
+      // Reload customer data to reflect changes
+      await loadCustomerData();
       
-      // Refresh parent component after a short delay
+      // Update parent component
       setTimeout(() => {
         window.location.reload();
-      }, 1000);
+      }, 500);
     } catch (error: any) {
-      console.error('💥 Tahsilat hatası:', error);
-      toast.error('Tahsilat kaydedilemedi: ' + (error.message || 'Bilinmeyen hata'));
+      console.error('\n💥 ===== TAHSİLAT HATASI =====');
+      console.error('Hata Detayı:', error);
+      toast.error('❌ Tahsilat kaydedilemedi: ' + (error.message || 'Bilinmeyen hata'));
     } finally {
       setPaymentLoading(false);
     }
