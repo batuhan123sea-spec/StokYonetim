@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Customer } from '@/types';
+import { Customer, RiskLevel } from '@/types';
 import { Button } from '@/components/ui/button';
-import { Plus, Users as UsersIcon } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Plus, Users as UsersIcon, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { CustomerList } from '@/components/customers/CustomerList';
 import { CustomerDialog } from '@/components/customers/CustomerDialog';
@@ -12,6 +14,8 @@ import { CustomerDetailPanel } from '@/components/customers/CustomerDetailPanel'
 export function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [riskFilter, setRiskFilter] = useState<RiskLevel | 'all'>('all');
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -38,9 +42,32 @@ export function Customers() {
     }
   };
 
-  const filteredCustomers = selectedLetter
-    ? customers.filter((c) => c.name.toUpperCase().startsWith(selectedLetter))
-    : customers;
+  // Apply all filters
+  const filteredCustomers = customers.filter((customer) => {
+    // Letter filter
+    if (selectedLetter && !customer.name.toUpperCase().startsWith(selectedLetter)) {
+      return false;
+    }
+
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const matchesName = customer.name.toLowerCase().includes(query);
+      const matchesPhone = customer.phone?.toLowerCase().includes(query);
+      const matchesVergi = customer.vergi_no?.toLowerCase().includes(query);
+      
+      if (!matchesName && !matchesPhone && !matchesVergi) {
+        return false;
+      }
+    }
+
+    // Risk filter
+    if (riskFilter !== 'all' && customer.risk_durumu !== riskFilter) {
+      return false;
+    }
+
+    return true;
+  });
 
   const handleEdit = (customer: Customer) => {
     setSelectedCustomer(customer);
@@ -65,13 +92,48 @@ export function Customers() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Müşteriler</h1>
+          <h1 className="text-3xl font-bold">Müşteri Defteri</h1>
           <p className="text-muted-foreground mt-1">Müşterilerinizi ve hesap bakiyelerini yönetin</p>
         </div>
         <Button onClick={() => setDialogOpen(true)}>
           <Plus className="w-4 h-4 mr-2" />
           Yeni Müşteri
         </Button>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-card border border-border rounded-lg p-4">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+          <div className="md:col-span-5">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Müşteri adı, telefon veya vergi no ile ara..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+          </div>
+          <div className="md:col-span-3">
+            <Select value={riskFilter} onValueChange={(v) => setRiskFilter(v as RiskLevel | 'all')}>
+              <SelectTrigger>
+                <SelectValue placeholder="Risk Durumu" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tüm Risk Durumları</SelectItem>
+                <SelectItem value="Düşük">🟢 Düşük Risk</SelectItem>
+                <SelectItem value="Orta">🟡 Orta Risk</SelectItem>
+                <SelectItem value="Yüksek">🔴 Yüksek Risk</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-4 flex items-center justify-end">
+            <span className="text-sm text-muted-foreground">
+              <span className="font-semibold">{filteredCustomers.length}</span> müşteri gösteriliyor
+            </span>
+          </div>
+        </div>
       </div>
 
       <AlphabetFilter
@@ -84,10 +146,23 @@ export function Customers() {
           <UsersIcon className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
           <h3 className="text-lg font-semibold mb-2">Müşteri bulunamadı</h3>
           <p className="text-muted-foreground text-sm">
-            {selectedLetter
-              ? `${selectedLetter} harfi ile başlayan müşteri bulunamadı.`
+            {searchQuery || riskFilter !== 'all' || selectedLetter
+              ? 'Arama kriterlerinize uygun müşteri bulunamadı.'
               : 'Henüz müşteri eklenmemiş. Başlamak için yeni müşteri ekleyin.'}
           </p>
+          {(searchQuery || riskFilter !== 'all' || selectedLetter) && (
+            <Button
+              variant="outline"
+              className="mt-4"
+              onClick={() => {
+                setSearchQuery('');
+                setRiskFilter('all');
+                setSelectedLetter(null);
+              }}
+            >
+              Filtreleri Temizle
+            </Button>
+          )}
         </div>
       ) : (
         <CustomerList 

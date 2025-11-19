@@ -3,6 +3,8 @@ export type PaymentType = 'NAKIT' | 'KREDI_KARTI' | 'FHT' | 'HVL' | 'HAVALE' | '
 export type ReserveStatus = 'open' | 'completed' | 'expired' | 'cancelled';
 export type TransactionType = 'reserve' | 'sale' | 'payment' | 'refund' | 'opening';
 export type StockMovementType = 'purchase' | 'sale' | 'return' | 'reserve_out' | 'reserve_in' | 'adjustment';
+export type RiskLevel = 'Düşük' | 'Orta' | 'Yüksek';
+export type PaymentStatus = 'BEKLIYOR' | 'ODEME_YAPILDI' | 'KISMIPAID' | 'GECIKTI';
 
 export interface Category {
   id: string;
@@ -63,10 +65,12 @@ export interface Customer {
   phone?: string;
   email?: string;
   address?: string;
+  vergi_no?: string;
   opening_balance: number;
   opening_currency: Currency;
   current_balance: number;
   credit_limit?: number;
+  risk_durumu: RiskLevel;
   notes?: string;
   created_at: string;
   updated_at: string;
@@ -88,6 +92,8 @@ export interface Sale {
   is_reserved: boolean;
   is_from_reserve: boolean;
   reserve_id?: string;
+  vade_tarihi?: string;
+  odeme_durumu: PaymentStatus;
   notes?: string;
   created_by?: string;
   created_at: string;
@@ -216,4 +222,18 @@ export interface DashboardStats {
   totalSales: number;
   todaySales: number;
   pendingBalance: number;
+}
+
+export interface CustomerSummary {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  vergi_no?: string;
+  toplam_alacak: number;
+  kredi_limiti?: number;
+  risk_durumu: RiskLevel;
+  geciken_tutar: number;
+  son_islem_tarihi?: string;
+  geciken_fatura_sayisi: number;
 }

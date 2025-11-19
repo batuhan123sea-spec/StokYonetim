@@ -1,7 +1,8 @@
-import { Customer } from '@/types';
+import { Customer, RiskLevel } from '@/types';
 import { formatCurrency } from '@/lib/utils';
-import { Edit, Phone, Mail, Eye } from 'lucide-react';
+import { Edit, Phone, Mail, Eye, AlertTriangle, TrendingDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 interface CustomerListProps {
   customers: Customer[];
@@ -10,6 +11,19 @@ interface CustomerListProps {
 }
 
 export function CustomerList({ customers, onEdit, onViewDetail }: CustomerListProps) {
+  const getRiskBadge = (risk: RiskLevel) => {
+    switch (risk) {
+      case 'Düşük':
+        return <Badge variant="outline" className="bg-green-500/10 text-green-700 border-green-500/20">🟢 Düşük Risk</Badge>;
+      case 'Orta':
+        return <Badge variant="outline" className="bg-yellow-500/10 text-yellow-700 border-yellow-500/20">🟡 Orta Risk</Badge>;
+      case 'Yüksek':
+        return <Badge variant="outline" className="bg-red-500/10 text-red-700 border-red-500/20">🔴 Yüksek Risk</Badge>;
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="bg-card rounded-lg border border-border overflow-hidden">
       <table className="data-table">
@@ -17,9 +31,9 @@ export function CustomerList({ customers, onEdit, onViewDetail }: CustomerListPr
           <tr>
             <th>Müşteri Adı</th>
             <th>İletişim</th>
-            <th>Açılış Bakiyesi</th>
             <th>Güncel Bakiye</th>
-            <th>Durum</th>
+            <th>Kredi Limiti</th>
+            <th>Risk Durumu</th>
             <th>İşlem</th>
           </tr>
         </thead>
@@ -27,10 +41,28 @@ export function CustomerList({ customers, onEdit, onViewDetail }: CustomerListPr
           {customers.map((customer) => {
             const hasDebt = customer.current_balance > 0;
             
-            return (
+            const getRiskBadge = (risk: RiskLevel) => {
+    switch (risk) {
+      case 'Düşük':
+        return <Badge variant="outline" className="bg-green-500/10 text-green-700 border-green-500/20">🟢 Düşük Risk</Badge>;
+      case 'Orta':
+        return <Badge variant="outline" className="bg-yellow-500/10 text-yellow-700 border-yellow-500/20">🟡 Orta Risk</Badge>;
+      case 'Yüksek':
+        return <Badge variant="outline" className="bg-red-500/10 text-red-700 border-red-500/20">🔴 Yüksek Risk</Badge>;
+      default:
+        return null;
+    }
+  };
+
+  return (
               <tr key={customer.id}>
                 <td>
-                  <div className="font-medium">{customer.name}</div>
+                  <div>
+                    <div className="font-medium">{customer.name}</div>
+                    {customer.vergi_no && (
+                      <div className="text-xs text-muted-foreground mt-0.5">Vergi No: {customer.vergi_no}</div>
+                    )}
+                  </div>
                 </td>
                 <td>
                   <div className="space-y-1">
@@ -48,19 +80,27 @@ export function CustomerList({ customers, onEdit, onViewDetail }: CustomerListPr
                     )}
                   </div>
                 </td>
-                <td>{formatCurrency(customer.opening_balance)}</td>
                 <td>
-                  <span className={hasDebt ? 'text-destructive font-semibold' : 'text-success'}>
-                    {formatCurrency(customer.current_balance)}
-                  </span>
+                  <div className="space-y-1">
+                    <span className={hasDebt ? 'text-red-600 font-bold text-lg' : 'text-green-600 font-semibold'}>
+                      {formatCurrency(customer.current_balance)}
+                    </span>
+                    {customer.credit_limit && customer.current_balance > customer.credit_limit * 0.8 && (
+                      <div className="flex items-center gap-1 text-xs text-orange-600">
+                        <AlertTriangle className="w-3 h-3" />
+                        <span>Limite yaklaşıyor</span>
+                      </div>
+                    )}
+                  </div>
                 </td>
                 <td>
-                  {hasDebt ? (
-                    <span className="badge badge-danger">Borçlu</span>
+                  {customer.credit_limit ? (
+                    <span className="text-muted-foreground">{formatCurrency(customer.credit_limit)}</span>
                   ) : (
-                    <span className="badge badge-success">Temiz</span>
+                    <span className="text-xs text-muted-foreground">-</span>
                   )}
                 </td>
+                <td>{getRiskBadge(customer.risk_durumu)}</td>
                 <td>
                   <div className="flex gap-2">
                     <Button size="sm" variant="ghost" onClick={() => onViewDetail(customer)} title="Detay Görüntüle">
