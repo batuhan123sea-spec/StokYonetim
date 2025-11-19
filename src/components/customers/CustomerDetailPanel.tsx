@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Download, FileText, DollarSign, Plus, Printer, Package } from 'lucide-react';
+import { X, Download, FileText, DollarSign, Plus, Printer, Package, AlertCircle, CheckCircle, Clock } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Customer, CustomerTransaction, Currency } from '@/types';
 import { formatCurrency } from '@/lib/utils';
@@ -23,6 +23,15 @@ interface TransactionWithDetails extends CustomerTransaction {
     unit_price: number;
   }>;
   balance_before?: number;
+  sale_details?: {
+    subtotal: number;
+    tax: number;
+    total_amount: number;
+    tax_rate: number;
+    vade_tarihi?: string;
+    odeme_durumu: string;
+    sale_id: string;
+  };
 }
 
 export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelProps) {
@@ -52,7 +61,7 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
 
       if (txError) throw txError;
 
-      // For each sale transaction, load sale items
+      // For each sale transaction, load sale items and sale details
       const transactionsWithDetails: TransactionWithDetails[] = [];
       
       for (const tx of txData || []) {
@@ -75,6 +84,25 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
         txWithDetails.balance_before = previousBalance;
 
         if (tx.type === 'sale' && tx.ref_id) {
+          // Load sale details (KDV, vade tarihi, ödeme durumu)
+          const { data: saleData, error: saleError } = await supabase
+            .from('sales')
+            .select('id, subtotal, tax, total_amount, tax_rate, vade_tarihi, odeme_durumu')
+            .eq('id', tx.ref_id)
+            .single();
+
+          if (!saleError && saleData) {
+            txWithDetails.sale_details = {
+              subtotal: saleData.subtotal || 0,
+              tax: saleData.tax || 0,
+              total_amount: saleData.total_amount,
+              tax_rate: saleData.tax_rate,
+              vade_tarihi: saleData.vade_tarihi,
+              odeme_durumu: saleData.odeme_durumu,
+              sale_id: saleData.id,
+            };
+          }
+
           // Load sale items with product names
           const { data: saleItemsData, error: saleItemsError } = await supabase
             .from('sale_items')
@@ -259,6 +287,47 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
       default:
         return 'text-muted-foreground';
     }
+  };
+
+  const getPaymentStatusBadge = (status: string) => {
+    switch (status) {
+      case 'ODEME_YAPILDI':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-green-500/10 text-green-700 rounded-full border border-green-500/20">
+            <CheckCircle className="w-3 h-3" />
+            Ödendi
+          </span>
+        );
+      case 'BEKLIYOR':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-yellow-500/10 text-yellow-700 rounded-full border border-yellow-500/20">
+            <Clock className="w-3 h-3" />
+            Bekliyor
+          </span>
+        );
+      case 'GECIKTI':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-red-500/10 text-red-700 rounded-full border border-red-500/20">
+            <AlertCircle className="w-3 h-3" />
+            Gecikti
+          </span>
+        );
+      default:
+        return <span className="text-xs text-muted-foreground">{status}</span>;
+    }
+  };
+
+  const isOverdue = (vadeDate?: string) => {
+    if (!vadeDate) return false;
+    return new Date(vadeDate) < new Date();
+  };
+
+  // Calculate summary statistics
+  const summaryStats = {
+    totalSales: transactions.filter(t => t.type === 'sale').reduce((sum, t) => sum + t.amount, 0),
+    totalPayments: transactions.filter(t => t.type === 'payment').reduce((sum, t) => sum + t.amount, 0),
+    pendingAmount: transactions.filter(t => t.type === 'sale' && t.sale_details?.odeme_durumu === 'BEKLIYOR').reduce((sum, t) => sum + t.amount, 0),
+    overdueAmount: transactions.filter(t => t.type === 'sale' && t.sale_details?.odeme_durumu === 'GECIKTI').reduce((sum, t) => sum + t.amount, 0),
   };
 
   const exportCSV = () => {
@@ -541,7 +610,7 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
         </Card>
 
         {/* Add Payment Section */}
-        <Card className="p-5 bg-green-500/5 border-green-500/20">
+        <Card id="payment-section" className="p-5 bg-green-500/5 border-green-500/20 scroll-mt-20">
           <h3 className="font-semibold mb-4 flex items-center gap-2 text-green-700">
             <DollarSign className="w-5 h-5" />
             Tahsilat Kaydet
@@ -604,11 +673,31 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
           </div>
         </Card>
 
+        {/* Summary Stats */}
+        <div className="grid grid-cols-4 gap-4">
+          <Card className="p-4 bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-blue-500/20">
+            <p className="text-xs text-muted-foreground mb-1">Toplam Satış</p>
+            <p className="text-2xl font-bold text-blue-600">{formatCurrency(summaryStats.totalSales)}</p>
+          </Card>
+          <Card className="p-4 bg-gradient-to-br from-green-500/10 to-green-500/5 border-green-500/20">
+            <p className="text-xs text-muted-foreground mb-1">Toplam Tahsilat</p>
+            <p className="text-2xl font-bold text-green-600">{formatCurrency(summaryStats.totalPayments)}</p>
+          </Card>
+          <Card className="p-4 bg-gradient-to-br from-yellow-500/10 to-yellow-500/5 border-yellow-500/20">
+            <p className="text-xs text-muted-foreground mb-1">Bekleyen</p>
+            <p className="text-2xl font-bold text-yellow-600">{formatCurrency(summaryStats.pendingAmount)}</p>
+          </Card>
+          <Card className="p-4 bg-gradient-to-br from-red-500/10 to-red-500/5 border-red-500/20">
+            <p className="text-xs text-muted-foreground mb-1">Geciken</p>
+            <p className="text-2xl font-bold text-red-600">{formatCurrency(summaryStats.overdueAmount)}</p>
+          </Card>
+        </div>
+
         {/* Transaction History */}
         <Card className="p-5">
           <h3 className="font-semibold mb-4 flex items-center gap-2">
             <FileText className="w-5 h-5" />
-            Hesap Hareketleri ({transactions.length} İşlem)
+            İşlem Geçmişi ({transactions.length} İşlem)
           </h3>
 
           {loading ? (
@@ -631,7 +720,7 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
                   {/* Transaction Header */}
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-1">
+                      <div className="flex items-center gap-3 mb-1 flex-wrap">
                         <span className={`font-semibold ${getTransactionColor(tx.type)}`}>
                           {getTransactionTypeLabel(tx.type)}
                         </span>
@@ -644,16 +733,40 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
                             minute: '2-digit'
                           })}
                         </span>
+                        {tx.sale_details && getPaymentStatusBadge(tx.sale_details.odeme_durumu)}
+                        {tx.sale_details?.vade_tarihi && (
+                          <span className={`text-xs font-medium px-2 py-1 rounded ${
+                            isOverdue(tx.sale_details.vade_tarihi) 
+                              ? 'bg-red-500/10 text-red-700 border border-red-500/20' 
+                              : 'bg-green-500/10 text-green-700 border border-green-500/20'
+                          }`}>
+                            📅 Vade: {new Date(tx.sale_details.vade_tarihi).toLocaleDateString('tr-TR')}
+                          </span>
+                        )}
                       </div>
                       {tx.notes && (
                         <p className="text-xs text-muted-foreground italic">{tx.notes}</p>
                       )}
                     </div>
                     <div className="text-right">
-                      <p className={`text-lg font-bold ${tx.type === 'payment' ? 'text-green-600' : 'text-red-600'}`}>
-                        {tx.type === 'payment' ? '-' : '+'}
-                        {formatCurrency(tx.amount)} {tx.currency}
-                      </p>
+                      {tx.sale_details ? (
+                        <div>
+                          <div className="text-xs text-muted-foreground mb-0.5">
+                            KDV Hariç: {formatCurrency(tx.sale_details.subtotal)}
+                          </div>
+                          <div className="text-xs text-muted-foreground mb-1">
+                            KDV (%{tx.sale_details.tax_rate}): {formatCurrency(tx.sale_details.tax)}
+                          </div>
+                          <p className="text-lg font-bold text-red-600">
+                            +{formatCurrency(tx.sale_details.total_amount)} {tx.currency}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className={`text-lg font-bold ${tx.type === 'payment' ? 'text-green-600' : 'text-red-600'}`}>
+                          {tx.type === 'payment' ? '-' : '+'}
+                          {formatCurrency(tx.amount)} {tx.currency}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -679,21 +792,38 @@ export function CustomerDetailPanel({ customer, onClose }: CustomerDetailPanelPr
                     </div>
                   )}
 
-                  {/* Balance Info */}
+                  {/* Balance Info & Actions */}
                   <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-xs">
-                    <div>
-                      <span className="text-muted-foreground">Önceki Bakiye: </span>
-                      <span className="font-semibold">{formatCurrency(tx.balance_before || 0)}</span>
+                    <div className="flex items-center gap-4">
+                      <div>
+                        <span className="text-muted-foreground">Önceki Bakiye: </span>
+                        <span className="font-semibold">{formatCurrency(tx.balance_before || 0)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">→</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Sonraki Bakiye: </span>
+                        <span className={`font-bold ${tx.balance_after > 0 ? 'text-red-600' : tx.balance_after < 0 ? 'text-green-600' : ''}`}>
+                          {formatCurrency(tx.balance_after)}
+                        </span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-muted-foreground">→</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Sonraki Bakiye: </span>
-                      <span className={`font-bold ${tx.balance_after > 0 ? 'text-red-600' : tx.balance_after < 0 ? 'text-green-600' : ''}`}>
-                        {formatCurrency(tx.balance_after)}
-                      </span>
-                    </div>
+                    {tx.type === 'sale' && tx.sale_details?.odeme_durumu === 'BEKLIYOR' && (
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        className="bg-green-500/10 hover:bg-green-500/20 text-green-700 border-green-500/20"
+                        onClick={() => {
+                          setPaymentAmount(tx.amount.toString());
+                          setPaymentNotes(`${tx.sale_details?.sale_id} numaralı satış için ödeme`);
+                          document.getElementById('payment-section')?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                      >
+                        <DollarSign className="w-3 h-3 mr-1" />
+                        Ödeme Al
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
