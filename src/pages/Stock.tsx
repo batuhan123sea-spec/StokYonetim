@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { ProductList } from '@/components/stock/ProductList';
 import { ProductDialog } from '@/components/stock/ProductDialog';
 import { CategoryList } from '@/components/stock/CategoryList';
+import { StockAlerts } from '@/components/stock/StockAlerts';
 
 export function Stock() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -81,7 +82,8 @@ export function Stock() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="lg:col-span-1">
+        <div className="lg:col-span-1 space-y-6">
+          <StockAlerts onProductClick={handleEdit} />
           <CategoryList
             categories={categories}
             selectedCategory={selectedCategory}

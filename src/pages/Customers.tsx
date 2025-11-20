@@ -4,12 +4,13 @@ import { Customer, CustomerSummary, RiskLevel } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Users as UsersIcon, Search } from 'lucide-react';
+import { Plus, Users as UsersIcon, Search, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { CustomerList } from '@/components/customers/CustomerList';
 import { CustomerDialog } from '@/components/customers/CustomerDialog';
 import { AlphabetFilter } from '@/components/customers/AlphabetFilter';
 import { CustomerDetailPanel } from '@/components/customers/CustomerDetailPanel';
+import { WeeklyReportDialog } from '@/components/customers/WeeklyReportDialog';
 
 export function Customers() {
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
@@ -18,6 +19,7 @@ export function Customers() {
   const [riskFilter, setRiskFilter] = useState<RiskLevel | 'all'>('all');
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [weeklyReportOpen, setWeeklyReportOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
 
@@ -108,10 +110,16 @@ export function Customers() {
           <h1 className="text-3xl font-bold">Müşteri Defteri</h1>
           <p className="text-muted-foreground mt-1">Müşterilerinizi ve hesap bakiyelerini yönetin</p>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          Yeni Müşteri
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setWeeklyReportOpen(true)}>
+            <Calendar className="w-4 h-4 mr-2" />
+            Haftalık Rapor
+          </Button>
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Yeni Müşteri
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -209,6 +217,11 @@ export function Customers() {
       {detailCustomer && (
         <CustomerDetailPanel customer={detailCustomer} onClose={() => setDetailCustomer(null)} />
       )}
+
+      <WeeklyReportDialog
+        open={weeklyReportOpen}
+        onOpenChange={setWeeklyReportOpen}
+      />
     </div>
   );
 }

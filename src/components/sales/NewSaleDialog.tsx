@@ -180,6 +180,49 @@ export function NewSaleDialog({ open, onOpenChange, onSaved }: NewSaleDialogProp
       return;
     }
 
+    // CREDIT LIMIT CHECK: Warn if customer credit limit will be exceeded
+    if (customerId && !isReserved) {
+      try {
+        const { data: customerData, error: customerError } = await supabase
+          .from('customers')
+          .select('current_balance, credit_limit, name')
+          .eq('id', customerId)
+          .single();
+
+        if (!customerError && customerData) {
+          const currentBalance = customerData.current_balance;
+          const creditLimit = customerData.credit_limit || 0;
+          const newBalance = currentBalance + totalAmountInTL;
+
+          if (creditLimit > 0 && newBalance > creditLimit) {
+            const overage = newBalance - creditLimit;
+            const proceed = window.confirm(
+              `⚠️ KREDİ LİMİTİ UYARISI\n\n` +
+              `Müşteri: ${customerData.name}\n` +
+              `Mevcut Bakiye: ${formatCurrency(currentBalance)} TL\n` +
+              `Kredi Limiti: ${formatCurrency(creditLimit)} TL\n` +
+              `Satış Sonrası Bakiye: ${formatCurrency(newBalance)} TL\n` +
+              `Limit Aşımı: ${formatCurrency(overage)} TL\n\n` +
+              `Bu satışla müşteri kredi limitini ${formatCurrency(overage)} TL aşacak!\n\n` +
+              `Satışa devam etmek istiyor musunuz?`
+            );
+
+            if (!proceed) {
+              toast.info('Satış iptal edildi');
+              return;
+            }
+
+            toast.warning(`Kredi limiti aşıldı: ${formatCurrency(overage)} TL`, {
+              duration: 5000,
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Credit limit check error:', error);
+        // Continue with sale even if check fails
+      }
+    }
+
     setLoading(true);
 
     try {

@@ -2,14 +2,16 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Plus, Barcode, Zap, Package, AlertCircle } from 'lucide-react';
+import { Plus, Barcode, Zap, Package, AlertCircle, Undo2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { NewSaleDialog } from '@/components/sales/NewSaleDialog';
 import { SalesStats } from '@/components/sales/SalesStats';
+import { SaleReturnDialog } from '@/components/sales/SaleReturnDialog';
 
 export function Sales() {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [returnDialogOpen, setReturnDialogOpen] = useState(false);
   const [barcode, setBarcode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
@@ -131,10 +133,16 @@ export function Sales() {
           <h1 className="text-3xl font-bold">Satışlar</h1>
           <p className="text-muted-foreground mt-1">Hızlı satış için yukarıdan barkod okutun</p>
         </div>
-        <Button onClick={() => setDialogOpen(true)} size="lg" variant="outline">
-          <Plus className="w-5 h-5 mr-2" />
-          Manuel Satış
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setReturnDialogOpen(true)} size="lg" variant="outline">
+            <Undo2 className="w-5 h-5 mr-2" />
+            İade İşlemi
+          </Button>
+          <Button onClick={() => setDialogOpen(true)} size="lg" variant="outline">
+            <Plus className="w-5 h-5 mr-2" />
+            Manuel Satış
+          </Button>
+        </div>
       </div>
 
       {/* Quick Stats */}
@@ -155,6 +163,18 @@ export function Sales() {
         onOpenChange={setDialogOpen}
         onSaved={() => {
           setDialogOpen(false);
+          // Re-focus barcode input
+          setTimeout(() => {
+            barcodeInputRef.current?.focus();
+          }, 200);
+        }}
+      />
+
+      <SaleReturnDialog
+        open={returnDialogOpen}
+        onOpenChange={setReturnDialogOpen}
+        onReturned={() => {
+          setReturnDialogOpen(false);
           // Re-focus barcode input
           setTimeout(() => {
             barcodeInputRef.current?.focus();
